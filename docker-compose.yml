@@ -47,6 +47,26 @@ services:
     env_file:
       - .env
 
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.celery
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${CHAT_DB:-chatdb}
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./app:/app/app
+      - celery_logs:/var/log/celery
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
+  celery_logs:

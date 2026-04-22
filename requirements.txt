@@ -10,3 +10,4 @@ python-jose[cryptography]==3.3.0   # JWT
 passlib[bcrypt]==1.7.4             # Password hashing
 bcrypt==4.1.3                      # bcrypt algorithm
 email-validator==2.1.1             # For email validation
+celery==5.3.6

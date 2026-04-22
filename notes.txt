@@ -22,3 +22,13 @@ wscat -c "ws://localhost:8000/ws/1?token="
 {"type": "send_message", "data": {"content": "Hi Alice! Got it!"}}
 
 docker compose restart app app2
+
+docker-compose logs celery-worker
+
+docker exec -it flux-chat-fastapi-backend-celery-worker-1 celery -A app.tasks.celery_app inspect active
+docker exec -it flux-chat-fastapi-backend-celery-worker-1 celery -A app.tasks.celery_app inspect registered
+
+# In wscat, send 10 messages rapidly
+for i in {1..10}; do
+  echo '{"type":"send_message","data":{"content":"Message '$i'"}}' | wscat -c "ws://localhost:8000/ws/1?token=$ALICE_TOKEN"
+done
