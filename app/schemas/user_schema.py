@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -9,7 +10,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
 
 
 class LoginRequest(BaseModel):
@@ -28,3 +29,17 @@ class UserResponse(UserBase):
 
 class UserInDB(UserResponse):
     hashed_password: str
+
+
+class UserSearchResult(BaseModel):
+    id: int
+    username: str
+
+    class Config:
+        from_attributes = True
+
+
+class PresenceResponse(BaseModel):
+    user_id: int
+    is_online: bool
+    last_seen_at: Optional[datetime] = None

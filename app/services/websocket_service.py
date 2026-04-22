@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.connection_manager import manager
+from app.core.metrics import messages_sent_total
 from app.services import chat_service, message_service, user_service
 from app.tasks.notifications import send_push_notification, update_message_analytics
 
@@ -32,23 +33,27 @@ class WebSocketService:
             db=db, chat_id=chat_id, sender_id=sender_id, content=content
         )
 
-        # 3. Get sender info for notifications
+        # 3. Get sender info and chat metadata
         sender = await user_service.get_user_by_id(db, sender_id)
         sender_name = sender.username if sender else "Unknown"
 
-        # 4. Get all participants to notify (excluding sender for some notification types)
-        # Get chat with participants
         chat = await chat_service.get_chat_with_participants(db, chat_id)
         participants = chat.participants if chat else []
+        is_group = chat.is_group if chat else False
 
-        # 5. Prepare broadcast message
+        # Track message sent metric
+        messages_sent_total.labels(
+            chat_id=str(chat_id), is_group=str(is_group)
+        ).inc()
+
+        # 4. Prepare broadcast message
         broadcast_data = {
             "type": "new_message",
             "data": {
                 "id": message.id,
                 "chat_id": message.chat_id,
                 "sender_id": message.sender_id,
-                "sender_name": sender_name,  # Added for UI
+                "sender_name": sender_name,
                 "content": message.content,
                 "sent_at": message.sent_at.isoformat() if message.sent_at else None,
                 "updated_at": (
@@ -57,14 +62,11 @@ class WebSocketService:
             },
         }
 
-        # 6. Publish to Redis (all instances will broadcast locally)
+        # 5. Publish to Redis — the Redis listener handles broadcasting to all local
+        #    connections (including this instance), which avoids double-delivery.
         await manager.publish_to_redis(chat_id, broadcast_data)
 
-        # 7. Also broadcast locally for this instance (optimization)
-        await manager.broadcast_to_local_chat(chat_id, broadcast_data)
-
-        # 8. Trigger background tasks (non-blocking)
-        # Send push notifications to all participants except sender
+        # 6. Trigger background tasks (non-blocking)
         for participant in participants:
             if participant.user_id != sender_id:
                 # Send push notification asynchronously
@@ -79,7 +81,7 @@ class WebSocketService:
                     },
                 )
 
-        # 9. Update analytics (non-blocking)
+        # 7. Update analytics (non-blocking)
         update_message_analytics.delay(
             chat_id=chat_id, message_id=message.id, user_id=sender_id
         )

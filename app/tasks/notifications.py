@@ -1,36 +1,33 @@
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict
 
 from app.celery_app import celery_app
+from app.core.metrics import celery_task_duration_seconds, celery_tasks_total
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(
-    bind=True,
-    name="send_push_notification",
-    max_retries=3,
-    default_retry_delay=60,  # Retry after 60 seconds if fails
+    bind=True, name="send_push_notification", max_retries=3, default_retry_delay=60
 )
 def send_push_notification(self, user_id: int, message_data: Dict[str, Any]):
-    """
-    Simulate sending a push notification to a user.
-    In production, this would integrate with Firebase Cloud Messaging (FCM),
-    Apple Push Notification Service (APNS), or a webhook.
-    """
+    """Simulate sending a push notification to a user."""
+    start_time = time.time()
+    task_name = "send_push_notification"
+
     try:
         logger.info(f"Sending push notification to user {user_id}")
-        logger.info(f"Message data: {message_data}")
 
-        # Simulate API call to push notification service
-        # In production, you would call FCM/APNS/Expo here
+        # Simulate API call
+        # In production, this would call FCM/APNS
 
-        # Simulate potential failure (for testing retries)
-        # if message_data.get("content") == "fail":
-        #     raise Exception("Simulated push notification failure")
+        # Record success metric
+        duration = time.time() - start_time
+        celery_tasks_total.labels(task_name=task_name, status="success").inc()
+        celery_task_duration_seconds.labels(task_name=task_name).observe(duration)
 
-        # Log success
         logger.info(f"Push notification sent successfully to user {user_id}")
 
         # Return result for monitoring
@@ -42,6 +39,10 @@ def send_push_notification(self, user_id: int, message_data: Dict[str, Any]):
         }
 
     except Exception as e:
+        duration = time.time() - start_time
+        celery_tasks_total.labels(task_name=task_name, status="failure").inc()
+        celery_task_duration_seconds.labels(task_name=task_name).observe(duration)
+
         logger.error(f"Failed to send push notification to user {user_id}: {e}")
         # Retry the task
         raise self.retry(exc=e)
@@ -54,11 +55,18 @@ def send_email_notification(
     """
     Simulate sending an email notification for offline users.
     """
+    start_time = time.time()
+    task_name = "send_email_notification"
     try:
         logger.info(f"Sending email to {user_email}")
         logger.info(f"New message from {sender_name}: {message_preview}")
 
         # Simulate email sending (would use SMTP or email service API)
+
+        # Record success metric
+        duration = time.time() - start_time
+        celery_tasks_total.labels(task_name=task_name, status="success").inc()
+        celery_task_duration_seconds.labels(task_name=task_name).observe(duration)
 
         return {
             "status": "success",
@@ -67,6 +75,10 @@ def send_email_notification(
         }
 
     except Exception as e:
+        duration = time.time() - start_time
+        celery_tasks_total.labels(task_name=task_name, status="failure").inc()
+        celery_task_duration_seconds.labels(task_name=task_name).observe(duration)
+
         logger.error(f"Failed to send email to {user_email}: {e}")
         raise self.retry(exc=e)
 

@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.services.user_service import get_user_by_id
 
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -64,7 +65,7 @@ async def get_current_user(
 
 # Optional: dependency for optional auth (for public endpoints)
 async def get_current_user_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
     db: AsyncSession = Depends(get_db),
 ) -> Optional[User]:
     """Get current user if authenticated, otherwise None."""

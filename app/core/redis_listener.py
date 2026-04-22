@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from ast import Set
+from typing import Set
 
 import redis.asyncio as redis
 
