@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.v1 import auth, chats, health
+from app.api.v1.websocket import websocket_endpoint
 from app.core.config import settings
 from app.db.session import engine
 
@@ -23,6 +24,7 @@ def create_application() -> FastAPI:
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(chats.router, prefix="/api/v1")
+    app.add_api_websocket_route("/ws/{chat_id}", websocket_endpoint)
 
     @app.get("/")
     async def root():

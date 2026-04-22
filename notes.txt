@@ -11,3 +11,12 @@ docker compose exec postgres psql -U postgres -d chatdb -c "\dt"
 docker compose exec postgres psql -U postgres -d chatdb -c "SELECT * FROM users;"
 
 docker compose restart app
+
+npm install -g wscat
+# or use websocat: brew install websocat
+
+curl -X POST http://localhost:8000/api/v1/auth/login   -H "Content-Type: application/json"   -d '{"username_or_email":"bob","email":"bob@example.com","password":"secret123"}'
+
+wscat -c "ws://localhost:8000/ws/1?token="
+
+{"type": "send_message", "data": {"content": "Hi Alice! Got it!"}}

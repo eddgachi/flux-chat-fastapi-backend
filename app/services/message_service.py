@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 from sqlalchemy import desc, func, select
@@ -16,8 +17,11 @@ async def create_message(
     # Update chat's updated_at timestamp
     from app.db.models.chat import Chat
 
-    await db.execute(select(Chat).where(Chat.id == chat_id))
-    # Simpler: just commit and let DB handle onupdate
+    result = await db.execute(select(Chat).where(Chat.id == chat_id))
+    chat = result.scalar_one_or_none()
+    if chat:
+        chat.updated_at = datetime.utcnow()
+
     await db.commit()
     await db.refresh(message)
     return message
