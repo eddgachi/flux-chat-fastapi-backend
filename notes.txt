@@ -9,3 +9,5 @@ docker compose exec postgres psql -U postgres -d chatdb
 docker compose exec postgres psql -U postgres -d chatdb -c "\dt"
 
 docker compose exec postgres psql -U postgres -d chatdb -c "SELECT * FROM users;"
+
+docker compose restart app

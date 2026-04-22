@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.v1 import auth, health
+from app.api.v1 import auth, chats, health
 from app.core.config import settings
 from app.db.session import engine
 
@@ -22,6 +22,7 @@ def create_application() -> FastAPI:
 
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(chats.router, prefix="/api/v1")
 
     @app.get("/")
     async def root():
