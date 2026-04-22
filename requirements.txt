@@ -4,5 +4,9 @@ pydantic-settings==2.4.0
 python-dotenv==1.0.1
 redis==5.0.1
 asyncpg==0.29.0
-sqlalchemy==2.0.35  # for Phase 2
-alembic==1.13.3     # for Phase 2
+sqlalchemy==2.0.35
+alembic==1.13.3
+python-jose[cryptography]==3.3.0   # JWT
+passlib[bcrypt]==1.7.4             # Password hashing
+bcrypt==4.1.3                      # bcrypt algorithm
+email-validator==2.1.1             # For email validation
