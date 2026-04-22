@@ -1,13 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api.v1 import health
 from app.core.config import settings
+from app.db.session import engine
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: nothing special needed (engine already created)
+    print("Starting up...")
+    yield
+    # Shutdown: dispose DB connections
+    await engine.dispose()
+    print("Shutting down...")
 
 
 def create_application() -> FastAPI:
-    app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
+    app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG, lifespan=lifespan)
 
-    # Include routers
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
 
     @app.get("/")

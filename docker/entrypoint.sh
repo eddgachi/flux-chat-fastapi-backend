@@ -1,7 +1,9 @@
 #!/bin/sh
 set -e
 
-# Run migrations will be added in Phase 2
-# For Phase 1 we just start the server
+# Wait for postgres to be ready (optional, but docker-compose healthcheck already ensures)
+echo "Running database migrations..."
+alembic upgrade head
 
+# Start the FastAPI app
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
