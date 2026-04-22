@@ -1,21 +1,38 @@
+import json
 import logging
 from typing import Dict, Set
 
+import redis.asyncio as redis
 from fastapi import WebSocket
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
     """
-    Manages WebSocket connections per chat.
-    In Phase 5, this is in-memory (single instance).
-    Phase 6 will add Redis pub/sub for multi-instance support.
+    Manages local WebSocket connections and publishes to Redis.
     """
 
     def __init__(self):
-        # chat_id -> set of WebSocket connections
+        # Local connections only (this instance)
         self.active_connections: Dict[int, Set[WebSocket]] = {}
+        # Redis client for publishing
+        self.redis_client: redis.Redis = None
+
+    async def initialize_redis(self):
+        """Initialize Redis client for publishing."""
+        self.redis_client = await redis.from_url(
+            settings.REDIS_URL, encoding="utf-8", decode_responses=True
+        )
+        logger.info("Redis publisher initialized")
+
+    async def close_redis(self):
+        """Close Redis connection."""
+        if self.redis_client:
+            await self.redis_client.close()
+            logger.info("Redis publisher closed")
 
     async def connect(self, chat_id: int, websocket: WebSocket):
         """Accept and store a new WebSocket connection."""
@@ -26,7 +43,7 @@ class ConnectionManager:
 
         self.active_connections[chat_id].add(websocket)
         logger.info(
-            f"Client connected to chat {chat_id}. Total connections: {len(self.active_connections[chat_id])}"
+            f"Client connected to chat {chat_id}. Local connections: {len(self.active_connections[chat_id])}"
         )
 
     def disconnect(self, chat_id: int, websocket: WebSocket):
@@ -34,18 +51,16 @@ class ConnectionManager:
         if chat_id in self.active_connections:
             self.active_connections[chat_id].discard(websocket)
 
-            # Clean up empty chat rooms
             if not self.active_connections[chat_id]:
                 del self.active_connections[chat_id]
 
             logger.info(f"Client disconnected from chat {chat_id}")
 
-    async def broadcast_to_chat(self, chat_id: int, message: dict):
+    async def broadcast_to_local_chat(self, chat_id: int, message: dict):
         """
-        Broadcast a message to all connected clients in a specific chat.
+        Broadcast a message only to local connections (this instance).
         """
         if chat_id not in self.active_connections:
-            logger.info(f"No active connections for chat {chat_id}")
             return
 
         disconnected = []
@@ -60,6 +75,21 @@ class ConnectionManager:
         # Clean up disconnected clients
         for connection in disconnected:
             self.disconnect(chat_id, connection)
+
+    async def publish_to_redis(self, chat_id: int, message: dict):
+        """
+        Publish a message to Redis channel for this chat.
+        """
+        if not self.redis_client:
+            logger.error("Redis client not initialized")
+            return
+
+        channel = f"chat:{chat_id}"
+        try:
+            await self.redis_client.publish(channel, json.dumps(message))
+            logger.debug(f"Published to Redis channel: {channel}")
+        except Exception as e:
+            logger.error(f"Error publishing to Redis: {e}")
 
     async def send_personal_message(self, websocket: WebSocket, message: dict):
         """Send a message to a specific connection."""

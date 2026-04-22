@@ -5,6 +5,7 @@ from fastapi import Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.connection_manager import manager
+from app.core.redis_listener import redis_listener
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.services import chat_service, user_service
@@ -71,7 +72,10 @@ async def websocket_endpoint(
     # Accept connection and add to manager
     await manager.connect(chat_id, websocket)
 
-    # Send confirmation to client
+    # Subscribe to Redis channel for this chat (if not already)
+    await redis_listener.subscribe_to_chat(chat_id)  # ADD THIS
+
+    # Send confirmation
     await manager.send_personal_message(
         websocket,
         {
@@ -150,7 +154,22 @@ async def websocket_endpoint(
 
     except WebSocketDisconnect:
         manager.disconnect(chat_id, websocket)
+
+        # Check if this was the last connection to this chat
+        if (
+            chat_id not in manager.active_connections
+            or not manager.active_connections[chat_id]
+        ):
+            await redis_listener.unsubscribe_from_chat(chat_id)
+
         logger.info(f"User {user_id} disconnected from chat {chat_id}")
     except Exception as e:
         logger.error(f"Unexpected error in WebSocket: {e}")
         manager.disconnect(chat_id, websocket)
+
+        # Check if this was the last connection
+        if (
+            chat_id not in manager.active_connections
+            or not manager.active_connections[chat_id]
+        ):
+            await redis_listener.unsubscribe_from_chat(chat_id)

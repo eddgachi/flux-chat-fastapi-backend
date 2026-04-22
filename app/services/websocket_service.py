@@ -16,7 +16,8 @@ class WebSocketService:
         db: AsyncSession, chat_id: int, sender_id: int, content: str
     ):
         """
-        Save message to database and broadcast to chat participants.
+        Save message to database and broadcast to all instances via Redis.
+        Each instance will then broadcast to its local connections.
         """
         # 1. Verify user is participant (security check)
         is_participant = await chat_service.is_participant(db, chat_id, sender_id)
@@ -46,10 +47,16 @@ class WebSocketService:
             },
         }
 
-        # 4. Broadcast to all connected clients in the chat
-        await manager.broadcast_to_chat(chat_id, broadcast_data)
+        # 4. Publish to Redis (all instances will receive and broadcast locally)
+        await manager.publish_to_redis(chat_id, broadcast_data)
 
-        logger.info(f"Message {message.id} broadcasted to chat {chat_id}")
+        # 5. Also broadcast locally for this instance (optimization)
+        #    This avoids going through Redis for local clients
+        await manager.broadcast_to_local_chat(chat_id, broadcast_data)
+
+        logger.info(
+            f"Message {message.id} published to Redis and broadcasted locally for chat {chat_id}"
+        )
         return True
 
 

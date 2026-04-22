@@ -20,3 +20,5 @@ curl -X POST http://localhost:8000/api/v1/auth/login   -H "Content-Type: applica
 wscat -c "ws://localhost:8000/ws/1?token="
 
 {"type": "send_message", "data": {"content": "Hi Alice! Got it!"}}
+
+docker compose restart app app2
