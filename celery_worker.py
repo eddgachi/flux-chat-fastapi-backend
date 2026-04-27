@@ -1,8 +1,10 @@
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
 from celery import Celery
+from sqlalchemy import delete, select
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 celery_app = Celery("chat_worker", broker=REDIS_URL, backend=REDIS_URL)
@@ -13,6 +15,17 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 )
+
+# ------------------------------------------------------------
+# Celery Beat schedule
+# ------------------------------------------------------------
+celery_app.conf.beat_schedule = {
+    "delete-expired-statuses": {
+        "task": "celery_worker.delete_expired_statuses",
+        "schedule": 3600.0,  # every hour
+    },
+}
+celery_app.conf.timezone = "UTC"
 
 # ------------------------------------------------------------
 # Media processing configuration
@@ -86,3 +99,29 @@ def process_media(media_id: str, original_path: str, media_type: str, mime_type:
             await db.commit()
 
     asyncio.run(_process())
+
+
+@celery_app.task
+def delete_expired_statuses():
+    """Delete statuses with expires_at < now() and associated views."""
+    import asyncio
+
+    from db.models.status import Status, StatusView
+    from db.session import AsyncSessionLocal
+
+    async def _clean():
+        async with AsyncSessionLocal() as db:
+            now = datetime.now(timezone.utc)
+            # Delete views first (cascade not automatic if we delete manually)
+            stmt_views = delete(StatusView).where(
+                StatusView.status_id.in_(
+                    select(Status.id).where(Status.expires_at < now)
+                )
+            )
+            await db.execute(stmt_views)
+            stmt = delete(Status).where(Status.expires_at < now)
+            result = await db.execute(stmt)
+            await db.commit()
+            return result.rowcount
+
+    return asyncio.run(_clean())

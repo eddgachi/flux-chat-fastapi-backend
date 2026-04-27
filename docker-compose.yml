@@ -60,6 +60,20 @@ services:
     env_file:
       - .env
 
+  celery_beat:
+    build: .
+    command: celery -A celery_worker.celery_app beat --loglevel=info
+    depends_on:
+      - redis
+      - app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-chatdb}
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+
 volumes:
   postgres_data:
   redis_data:

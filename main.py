@@ -4,7 +4,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
 from sqlalchemy import func, select, update
 
-from api.routes import auth, chats, health, media, users
+from api.routes import auth, chats, health, media, status, users
 from db.models.chat import Chat, ChatParticipant, ChatType
 from db.models.media import Media
 from db.models.message import DeliveryStatus, Message, MessageDelivery, MessageStatus
@@ -20,6 +20,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(chats.router)
 app.include_router(media.router)
+app.include_router(status.router)
 app.include_router(health.router)
 
 
@@ -371,5 +372,4 @@ async def websocket_endpoint(
         manager.disconnect(user_id)
     finally:
         await update_last_seen(user_id, db)
-        await db.close()
         await db.close()
