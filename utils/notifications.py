@@ -41,4 +41,3 @@ async def send_to_user(user_id: UUID, title: str, body: str, data: dict, db):
     tokens = result.scalars().all()
     for token in tokens:
         await send_push_notification(token, title, body, data)
-        await send_push_notification(token, title, body, data)

@@ -50,7 +50,7 @@ async def enable_2fa(
     # Generate QR code URI
     totp = pyotp.TOTP(secret)
     provisioning_uri = totp.provisioning_uri(
-        name=current_user.phone_number, issuer_name="ChatApp"
+        name=current_user.phone_number, issuer_name="FluxChatApp"
     )
     # Generate QR code as base64
     qr = qrcode.make(provisioning_uri)
