@@ -1,12 +1,20 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-class Token(BaseModel):
+
+class OTPRequest(BaseModel):
+    phone_number: str = Field(..., pattern="^\\+?[1-9]\\d{1,14}$")
+
+
+class OTPVerify(BaseModel):
+    phone_number: str
+    code: str
+
+
+class TokenResponse(BaseModel):
     access_token: str
-    token_type: str
+    refresh_token: str
+    token_type: str = "bearer"
 
-class TokenData(BaseModel):
-    email: str | None = None
 
-class Login(BaseModel):
-    username: str
-    password: str
+class RefreshRequest(BaseModel):
+    refresh_token: str

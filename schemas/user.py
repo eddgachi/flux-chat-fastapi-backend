@@ -1,19 +1,17 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from datetime import datetime
+from uuid import UUID
 
-class UserBase(BaseModel):
-    email: EmailStr
-    full_name: Optional[str] = None
-    is_active: Optional[bool] = True
+from pydantic import BaseModel
 
-class UserCreate(UserBase):
-    password: str
 
-class UserUpdate(UserBase):
-    password: Optional[str] = None
+class UserOut(BaseModel):
+    id: UUID
+    phone_number: str
+    name: str | None
+    avatar_url: str | None
+    created_at: datetime
 
-class User(UserBase):
-    id: int
 
-    class Config:
-        from_attributes = True
+class UserUpdate(BaseModel):
+    name: str | None = None
+    avatar_url: str | None = None
