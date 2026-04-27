@@ -2,15 +2,15 @@ from uuid import UUID
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select, update
 
 from api.routes import auth, chats, health, users
 from db.models.chat import Chat, ChatParticipant, ChatType
-from db.models.message import Message, MessageStatus
+from db.models.message import DeliveryStatus, Message, MessageDelivery, MessageStatus
 from db.models.user import User
 from db.session import AsyncSessionLocal
 from services.websocket_manager import manager
-from utils.presence import set_online, update_last_seen
+from utils.presence import get_redis, set_online, update_last_seen
 from utils.security import decode_token
 
 app = FastAPI(title="Chat App Backend", version="0.1.0")
@@ -53,8 +53,9 @@ async def websocket_endpoint(
 
         await manager.connect(user_id, websocket)
 
-        # Deliver pending messages on reconnect
-        stmt = (
+        # -------------------- Deliver pending messages on reconnect --------------------
+        # Private: pending messages where receiver is this user and status is 'sent'
+        private_pending = (
             select(Message)
             .join(Chat, Message.chat_id == Chat.id)
             .join(ChatParticipant, Chat.id == ChatParticipant.chat_id)
@@ -65,9 +66,8 @@ async def websocket_endpoint(
                 Message.status == MessageStatus.SENT,
             )
         )
-        result = await db.execute(stmt)
-        pending = result.scalars().all()
-        for msg in pending:
+        result = await db.execute(private_pending)
+        for msg in result.scalars().all():
             await manager.send_personal_message(
                 user_id,
                 {
@@ -81,83 +81,173 @@ async def websocket_endpoint(
                 },
             )
             msg.status = MessageStatus.DELIVERED
+
+        # Group: pending deliveries for this user with status 'sent'
+        group_pending = (
+            select(MessageDelivery, Message)
+            .join(Message, MessageDelivery.message_id == Message.id)
+            .where(
+                MessageDelivery.user_id == user_id,
+                MessageDelivery.status == DeliveryStatus.SENT,
+            )
+        )
+        result = await db.execute(group_pending)
+        for delivery, msg in result.all():
+            await manager.send_personal_message(
+                user_id,
+                {
+                    "type": "message",
+                    "id": str(msg.id),
+                    "chat_id": str(msg.chat_id),
+                    "sender_id": str(msg.sender_id),
+                    "text": msg.text,
+                    "created_at": msg.created_at.isoformat(),
+                },
+            )
+            delivery.status = DeliveryStatus.DELIVERED
+            delivery.delivered_at = func.now()
+
         await db.commit()
 
-        # Main loop
+        # -------------------- Main loop --------------------
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
 
             if msg_type == "message":
-                to_user_id = UUID(data["to_user_id"])
+                chat_id = UUID(data["chat_id"])
                 text = data["text"]
                 temp_id = data.get("temp_id")
 
-                # Find or create private chat
-                stmt = (
-                    select(Chat)
-                    .join(ChatParticipant, Chat.id == ChatParticipant.chat_id)
-                    .where(Chat.type == ChatType.PRIVATE)
-                    .group_by(Chat.id)
-                    .having(func.count(ChatParticipant.user_id) == 2)
-                    .having(
-                        and_(
-                            func.bool_or(ChatParticipant.user_id == user_id),
-                            func.bool_or(ChatParticipant.user_id == to_user_id),
-                        )
+                # Verify sender is a participant
+                participant_check = await db.execute(
+                    select(ChatParticipant).where(
+                        ChatParticipant.chat_id == chat_id,
+                        ChatParticipant.user_id == user_id,
                     )
                 )
-                result = await db.execute(stmt)
-                chat = result.scalar_one_or_none()
-                if not chat:
-                    chat = Chat(type=ChatType.PRIVATE)
-                    db.add(chat)
-                    await db.flush()
-                    db.add_all(
-                        [
-                            ChatParticipant(chat_id=chat.id, user_id=user_id),
-                            ChatParticipant(chat_id=chat.id, user_id=to_user_id),
-                        ]
+                if not participant_check.scalar_one_or_none():
+                    await websocket.send_json(
+                        {"type": "error", "message": "Not a participant"}
                     )
-                    await db.commit()
-                    await db.refresh(chat)
+                    continue
 
-                # Store message
+                # Fetch chat
+                chat = await db.get(Chat, chat_id)
+                if not chat:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Chat not found"}
+                    )
+                    continue
+
+                # Create the message
                 msg = Message(
-                    chat_id=chat.id,
+                    chat_id=chat_id,
                     sender_id=user_id,
                     text=text,
-                    status=MessageStatus.SENT,
+                    status=(
+                        MessageStatus.SENT if chat.type == ChatType.PRIVATE else None
+                    ),
                 )
                 db.add(msg)
-                await db.commit()
-                await db.refresh(msg)
+                await db.flush()
 
-                # Deliver to receiver if online
-                delivered = await manager.send_personal_message(
-                    to_user_id,
-                    {
-                        "type": "message",
-                        "id": str(msg.id),
-                        "chat_id": str(chat.id),
-                        "sender_id": str(user_id),
-                        "text": text,
-                        "status": msg.status,
-                        "created_at": msg.created_at.isoformat(),
-                    },
-                )
-                if delivered:
-                    msg.status = MessageStatus.DELIVERED
+                if chat.type == ChatType.PRIVATE:
+                    # Find the other participant (receiver)
+                    other_participant = await db.execute(
+                        select(ChatParticipant.user_id).where(
+                            ChatParticipant.chat_id == chat_id,
+                            ChatParticipant.user_id != user_id,
+                        )
+                    )
+                    receiver_id = other_participant.scalar_one()
                     await db.commit()
-                    await manager.send_personal_message(
-                        user_id,
+
+                    # Try to deliver
+                    delivered = await manager.send_personal_message(
+                        receiver_id,
                         {
-                            "type": "message_delivered",
-                            "temp_id": temp_id,
-                            "message_id": str(msg.id),
+                            "type": "message",
+                            "id": str(msg.id),
+                            "chat_id": str(chat_id),
+                            "sender_id": str(user_id),
+                            "text": text,
+                            "status": "sent",
+                            "created_at": msg.created_at.isoformat(),
                         },
                     )
-                else:
+                    if delivered:
+                        msg.status = MessageStatus.DELIVERED
+                        await db.commit()
+                        await manager.send_personal_message(
+                            user_id,
+                            {
+                                "type": "message_delivered",
+                                "temp_id": temp_id,
+                                "message_id": str(msg.id),
+                            },
+                        )
+                    else:
+                        await manager.send_personal_message(
+                            user_id,
+                            {
+                                "type": "message_sent",
+                                "temp_id": temp_id,
+                                "message_id": str(msg.id),
+                            },
+                        )
+
+                else:  # Group
+                    # Get all participants except sender
+                    participants = await db.execute(
+                        select(ChatParticipant.user_id).where(
+                            ChatParticipant.chat_id == chat_id,
+                            ChatParticipant.user_id != user_id,
+                        )
+                    )
+                    participant_ids = participants.scalars().all()
+
+                    # Create message deliveries
+                    deliveries = []
+                    for pid in participant_ids:
+                        deliveries.append(
+                            MessageDelivery(
+                                message_id=msg.id,
+                                user_id=pid,
+                                status=DeliveryStatus.SENT,
+                            )
+                        )
+                    db.add_all(deliveries)
+                    await db.commit()
+
+                    # For each online participant, send and update delivery status
+                    for pid in participant_ids:
+                        online = await manager.send_personal_message(
+                            pid,
+                            {
+                                "type": "message",
+                                "id": str(msg.id),
+                                "chat_id": str(chat_id),
+                                "sender_id": str(user_id),
+                                "text": text,
+                                "created_at": msg.created_at.isoformat(),
+                            },
+                        )
+                        if online:
+                            await db.execute(
+                                update(MessageDelivery)
+                                .where(
+                                    MessageDelivery.message_id == msg.id,
+                                    MessageDelivery.user_id == pid,
+                                )
+                                .values(
+                                    status=DeliveryStatus.DELIVERED,
+                                    delivered_at=func.now(),
+                                )
+                            )
+                    await db.commit()
+
+                    # Acknowledge sender
                     await manager.send_personal_message(
                         user_id,
                         {
@@ -169,10 +259,45 @@ async def websocket_endpoint(
 
             elif msg_type == "read":
                 message_id = UUID(data["message_id"])
+                chat_id = UUID(data.get("chat_id", ""))
                 msg = await db.get(Message, message_id)
-                if msg and msg.sender_id != user_id:
-                    msg.status = MessageStatus.READ
+
+                if not msg:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Message not found"}
+                    )
+                    continue
+
+                # Determine chat type to handle read receipt appropriately
+                chat = await db.get(Chat, msg.chat_id)
+
+                if chat and chat.type == ChatType.PRIVATE:
+                    # Private: update message status directly and notify sender
+                    if msg.sender_id != user_id:
+                        msg.status = MessageStatus.READ
+                        await db.commit()
+                        await manager.send_personal_message(
+                            msg.sender_id,
+                            {
+                                "type": "read_receipt",
+                                "message_id": str(msg.id),
+                                "chat_id": str(msg.chat_id),
+                                "reader_id": str(user_id),
+                            },
+                        )
+                elif chat and chat.type == ChatType.GROUP:
+                    # Group: update the delivery entry for this user
+                    await db.execute(
+                        update(MessageDelivery)
+                        .where(
+                            MessageDelivery.message_id == message_id,
+                            MessageDelivery.user_id == user_id,
+                        )
+                        .values(read_at=func.now())
+                    )
                     await db.commit()
+
+                    # Notify the sender that this user read it
                     await manager.send_personal_message(
                         msg.sender_id,
                         {
@@ -186,14 +311,15 @@ async def websocket_endpoint(
             elif msg_type == "typing":
                 chat_id = UUID(data["chat_id"])
                 is_typing = data.get("is_typing", False)
+
                 # Store typing indicator in Redis with short TTL
-                r = await auth.get_redis()
+                r = await get_redis()
                 if is_typing:
                     await r.setex(f"typing:{chat_id}:{user_id}", 3, "1")
                 else:
                     await r.delete(f"typing:{chat_id}:{user_id}")
-                # Broadcast to other participants in this chat
-                # Fetch all participants of this chat except the sender
+
+                # Broadcast to other participants
                 stmt = select(ChatParticipant.user_id).where(
                     ChatParticipant.chat_id == chat_id,
                     ChatParticipant.user_id != user_id,
@@ -213,7 +339,6 @@ async def websocket_endpoint(
 
             elif msg_type == "heartbeat":
                 await set_online(user_id)
-                # Optionally send heartbeat ack
                 await websocket.send_json({"type": "heartbeat_ack"})
 
     except WebSocketDisconnect:

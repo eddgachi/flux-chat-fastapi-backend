@@ -1,6 +1,6 @@
 # utils/presence.py
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -42,9 +42,7 @@ async def is_online(user_id: UUID) -> bool:
 
 async def update_last_seen(user_id: UUID, db: AsyncSession):
     await db.execute(
-        update(User)
-        .where(User.id == user_id)
-        .values(last_seen=datetime.now(timezone.utc))
+        update(User).where(User.id == user_id).values(last_seen=datetime.utcnow())
     )
     await db.commit()
 

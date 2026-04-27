@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from db.models import Chat, ChatParticipant, Message, User, UserSession
+from db.models import Chat, ChatParticipant, Message, MessageDelivery, User, UserSession
 from db.session import Base
 
 DATABASE_URL = os.getenv(

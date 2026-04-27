@@ -33,5 +33,6 @@ class ChatParticipant(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
+    role = Column(String(20), default="member")  # 'admin' or 'member'
+    muted_until = Column(DateTime, nullable=True)
     joined_at = Column(DateTime, server_default=func.now())
-    # For future phases: muted_until, role, etc. We'll keep simple for now.

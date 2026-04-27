@@ -1,5 +1,5 @@
 from .chat import Chat, ChatParticipant, ChatType
-from .message import Message, MessageStatus
+from .message import Message, MessageDelivery, MessageStatus
 from .user import User, UserSession
 
 __all__ = [
@@ -10,4 +10,5 @@ __all__ = [
     "ChatType",
     "Message",
     "MessageStatus",
+    "MessageDelivery",
 ]

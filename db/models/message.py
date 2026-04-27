@@ -15,6 +15,12 @@ class MessageStatus(str, enum.Enum):
     READ = "read"
 
 
+class DeliveryStatus(str, enum.Enum):
+    SENT = "sent"
+    DELIVERED = "delivered"
+    READ = "read"
+
+
 class Message(Base):
     __tablename__ = "messages"
 
@@ -30,3 +36,19 @@ class Message(Base):
     status = Column(SQLEnum(MessageStatus), default=MessageStatus.SENT)
     reply_to_id = Column(UUID(as_uuid=True), nullable=True)  # future
     created_at = Column(DateTime, server_default=func.now())
+
+
+class MessageDelivery(Base):
+    __tablename__ = "message_deliveries"
+
+    message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    status = Column(SQLEnum(DeliveryStatus), default=DeliveryStatus.SENT)
+    delivered_at = Column(DateTime, nullable=True)
+    read_at = Column(DateTime, nullable=True)
