@@ -12,6 +12,28 @@ docker compose exec postgres psql -U postgres -d chatdb -c "SELECT * FROM users;
 
 docker compose restart app
 
+curl -X POST http://localhost:8000/auth/request-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone_number": "+1234567890"}'
+  
+  
+  curl -X POST http://localhost:8000/auth/verify-otp \
+  -H "Content-Type: application/json" \
+  -d '{"phone_number": "+1234567890", "code": "123456"}'
+  
+  
+  curl -X GET http://localhost:8000/users/me \
+  -H "Authorization: Bearer <access_token>"
+  
+  
+  wscat -c "ws://localhost:8000/ws?token=<token_A>"
+  
+  
+  {"type": "message", "to_user_id": "3f85c89a-3181-46bd-89fd-8a56c7fe9308", "text": "Hello!", "temp_id": "abc123"}
+  
+  {"type": "read", "message_id": "<message_id_from_B>"}
+  
+
 npm install -g wscat
 # or use websocat: brew install websocat
 
