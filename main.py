@@ -4,8 +4,9 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
 from sqlalchemy import func, select, update
 
-from api.routes import auth, chats, health, users
+from api.routes import auth, chats, health, media, users
 from db.models.chat import Chat, ChatParticipant, ChatType
+from db.models.media import Media
 from db.models.message import DeliveryStatus, Message, MessageDelivery, MessageStatus
 from db.models.user import User
 from db.session import AsyncSessionLocal
@@ -18,6 +19,7 @@ app = FastAPI(title="Chat App Backend", version="0.1.0")
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(chats.router)
+app.include_router(media.router)
 app.include_router(health.router)
 
 
@@ -68,17 +70,20 @@ async def websocket_endpoint(
         )
         result = await db.execute(private_pending)
         for msg in result.scalars().all():
+            payload = {
+                "type": "message",
+                "id": str(msg.id),
+                "chat_id": str(msg.chat_id),
+                "sender_id": str(msg.sender_id),
+                "text": msg.text,
+                "status": msg.status,
+                "created_at": msg.created_at.isoformat(),
+            }
+            if msg.media_id:
+                payload["media_id"] = str(msg.media_id)
             await manager.send_personal_message(
                 user_id,
-                {
-                    "type": "message",
-                    "id": str(msg.id),
-                    "chat_id": str(msg.chat_id),
-                    "sender_id": str(msg.sender_id),
-                    "text": msg.text,
-                    "status": msg.status,
-                    "created_at": msg.created_at.isoformat(),
-                },
+                payload,
             )
             msg.status = MessageStatus.DELIVERED
 
@@ -93,16 +98,19 @@ async def websocket_endpoint(
         )
         result = await db.execute(group_pending)
         for delivery, msg in result.all():
+            payload = {
+                "type": "message",
+                "id": str(msg.id),
+                "chat_id": str(msg.chat_id),
+                "sender_id": str(msg.sender_id),
+                "text": msg.text,
+                "created_at": msg.created_at.isoformat(),
+            }
+            if msg.media_id:
+                payload["media_id"] = str(msg.media_id)
             await manager.send_personal_message(
                 user_id,
-                {
-                    "type": "message",
-                    "id": str(msg.id),
-                    "chat_id": str(msg.chat_id),
-                    "sender_id": str(msg.sender_id),
-                    "text": msg.text,
-                    "created_at": msg.created_at.isoformat(),
-                },
+                payload,
             )
             delivery.status = DeliveryStatus.DELIVERED
             delivery.delivered_at = func.now()
@@ -140,11 +148,23 @@ async def websocket_endpoint(
                     )
                     continue
 
+                # Optional media attachment
+                media_id = data.get("media_id")
+                if media_id:
+                    media_id = UUID(media_id)
+                    media_obj = await db.get(Media, media_id)
+                    if not media_obj or media_obj.user_id != user_id:
+                        await websocket.send_json(
+                            {"type": "error", "message": "Invalid media_id"}
+                        )
+                        continue
+
                 # Create the message
                 msg = Message(
                     chat_id=chat_id,
                     sender_id=user_id,
                     text=text,
+                    media_id=media_id,
                     status=(
                         MessageStatus.SENT if chat.type == ChatType.PRIVATE else None
                     ),
@@ -164,17 +184,20 @@ async def websocket_endpoint(
                     await db.commit()
 
                     # Try to deliver
+                    payload = {
+                        "type": "message",
+                        "id": str(msg.id),
+                        "chat_id": str(chat_id),
+                        "sender_id": str(user_id),
+                        "text": text,
+                        "status": "sent",
+                        "created_at": msg.created_at.isoformat(),
+                    }
+                    if media_id:
+                        payload["media_id"] = str(media_id)
                     delivered = await manager.send_personal_message(
                         receiver_id,
-                        {
-                            "type": "message",
-                            "id": str(msg.id),
-                            "chat_id": str(chat_id),
-                            "sender_id": str(user_id),
-                            "text": text,
-                            "status": "sent",
-                            "created_at": msg.created_at.isoformat(),
-                        },
+                        payload,
                     )
                     if delivered:
                         msg.status = MessageStatus.DELIVERED
@@ -221,17 +244,20 @@ async def websocket_endpoint(
                     await db.commit()
 
                     # For each online participant, send and update delivery status
+                    group_payload = {
+                        "type": "message",
+                        "id": str(msg.id),
+                        "chat_id": str(chat_id),
+                        "sender_id": str(user_id),
+                        "text": text,
+                        "created_at": msg.created_at.isoformat(),
+                    }
+                    if media_id:
+                        group_payload["media_id"] = str(media_id)
                     for pid in participant_ids:
                         online = await manager.send_personal_message(
                             pid,
-                            {
-                                "type": "message",
-                                "id": str(msg.id),
-                                "chat_id": str(chat_id),
-                                "sender_id": str(user_id),
-                                "text": text,
-                                "created_at": msg.created_at.isoformat(),
-                            },
+                            group_payload,
                         )
                         if online:
                             await db.execute(
@@ -345,4 +371,5 @@ async def websocket_endpoint(
         manager.disconnect(user_id)
     finally:
         await update_last_seen(user_id, db)
+        await db.close()
         await db.close()

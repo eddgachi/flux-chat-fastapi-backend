@@ -1,4 +1,5 @@
 from .chat import Chat, ChatParticipant, ChatType
+from .media import Media
 from .message import Message, MessageDelivery, MessageStatus
 from .user import User, UserSession
 
@@ -9,6 +10,7 @@ __all__ = [
     "ChatParticipant",
     "ChatType",
     "Message",
+    "Media",
     "MessageStatus",
     "MessageDelivery",
 ]
