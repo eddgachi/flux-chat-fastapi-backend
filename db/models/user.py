@@ -13,6 +13,8 @@ class User(Base):
     phone_number = Column(String(20), unique=True, index=True, nullable=False)
     name = Column(String(100), nullable=True)
     avatar_url = Column(String, nullable=True)
+    # add to User class:
+    last_seen = Column(DateTime, nullable=True, server_default=func.now())
     created_at = Column(DateTime, server_default=func.now())
 
 

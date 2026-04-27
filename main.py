@@ -10,6 +10,7 @@ from db.models.message import Message, MessageStatus
 from db.models.user import User
 from db.session import AsyncSessionLocal
 from services.websocket_manager import manager
+from utils.presence import set_online, update_last_seen
 from utils.security import decode_token
 
 app = FastAPI(title="Chat App Backend", version="0.1.0")
@@ -182,7 +183,41 @@ async def websocket_endpoint(
                         },
                     )
 
+            elif msg_type == "typing":
+                chat_id = UUID(data["chat_id"])
+                is_typing = data.get("is_typing", False)
+                # Store typing indicator in Redis with short TTL
+                r = await auth.get_redis()
+                if is_typing:
+                    await r.setex(f"typing:{chat_id}:{user_id}", 3, "1")
+                else:
+                    await r.delete(f"typing:{chat_id}:{user_id}")
+                # Broadcast to other participants in this chat
+                # Fetch all participants of this chat except the sender
+                stmt = select(ChatParticipant.user_id).where(
+                    ChatParticipant.chat_id == chat_id,
+                    ChatParticipant.user_id != user_id,
+                )
+                result = await db.execute(stmt)
+                other_user_ids = result.scalars().all()
+                for ouid in other_user_ids:
+                    await manager.send_personal_message(
+                        ouid,
+                        {
+                            "type": "typing",
+                            "chat_id": str(chat_id),
+                            "user_id": str(user_id),
+                            "is_typing": is_typing,
+                        },
+                    )
+
+            elif msg_type == "heartbeat":
+                await set_online(user_id)
+                # Optionally send heartbeat ack
+                await websocket.send_json({"type": "heartbeat_ack"})
+
     except WebSocketDisconnect:
         manager.disconnect(user_id)
     finally:
+        await update_last_seen(user_id, db)
         await db.close()

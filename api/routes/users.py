@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user
@@ -27,3 +29,28 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     return current_user
+
+
+@router.get("/{user_id}/presence")
+async def get_user_presence(
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Check if target user exists
+    target = await db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from utils.presence import is_online
+
+    online = await is_online(user_id)
+    if online:
+        return {"user_id": user_id, "status": "online", "last_seen": None}
+    else:
+        # last_seen is stored in DB
+        return {
+            "user_id": user_id,
+            "status": "offline",
+            "last_seen": target.last_seen.isoformat() if target.last_seen else None,
+        }
