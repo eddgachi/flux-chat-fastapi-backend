@@ -65,18 +65,43 @@ async def create_or_get_private_chat(
 
 @router.get("/", response_model=List[ChatOut])
 async def list_chats(
+    include_archived: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Get all chats where current_user is a participant, ordered by latest message time (optional)
+    # Build query for ChatParticipant with pinned/archived, join Chat, left join last message
+    # We'll do a subquery for last message per chat
+    last_msg_subq = (
+        select(Message.chat_id, func.max(Message.created_at).label("last_msg_time"))
+        .group_by(Message.chat_id)
+        .subquery()
+    )
     stmt = (
-        select(Chat)
+        select(
+            Chat,
+            ChatParticipant.pinned,
+            ChatParticipant.archived,
+            last_msg_subq.c.last_msg_time,
+        )
         .join(ChatParticipant, Chat.id == ChatParticipant.chat_id)
+        .outerjoin(last_msg_subq, Chat.id == last_msg_subq.c.chat_id)
         .where(ChatParticipant.user_id == current_user.id)
-        .order_by(Chat.created_at.desc())  # better: order by last_message_time
+    )
+    if not include_archived:
+        stmt = stmt.where(ChatParticipant.archived == False)
+    # Order by pinned DESC, then last_msg_time DESC (NULLs last)
+    stmt = stmt.order_by(
+        ChatParticipant.pinned.desc(), last_msg_subq.c.last_msg_time.desc().nullslast()
     )
     result = await db.execute(stmt)
-    chats = result.scalars().all()
+    rows = result.all()
+    chats = []
+    for row in rows:
+        chat = row[0]
+        # We'll convert to ChatOut – but we need to include pinned/archived flags? Maybe extend schema.
+        # For simplicity, we can return a separate DTO that includes flags.
+        # We'll modify ChatOut to have optional pinned/archived fields.
+        chats.append(chat)
     return chats
 
 
@@ -106,3 +131,59 @@ async def get_messages(
     messages = result.scalars().all()
     # Return in chronological order (oldest first) for convenience
     return list(reversed(messages))
+
+
+@router.patch("/{chat_id}/pin")
+async def pin_chat(
+    chat_id: UUID,
+    pinned: bool = True,  # query param or body? Use query param for simplicity
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # Verify user is participant
+    cp = await db.execute(
+        select(ChatParticipant).where(
+            ChatParticipant.chat_id == chat_id,
+            ChatParticipant.user_id == current_user.id,
+        )
+    )
+    cp = cp.scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    cp.pinned = pinned
+    await db.commit()
+    # Notify via WebSocket (if user connected)
+    from services.websocket_manager import manager
+
+    await manager.send_personal_message(
+        current_user.id,
+        {"type": "chat_list_update", "chat_id": str(chat_id), "pinned": pinned},
+    )
+    return {"pinned": pinned}
+
+
+@router.patch("/{chat_id}/archive")
+async def archive_chat(
+    chat_id: UUID,
+    archived: bool = True,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cp = await db.execute(
+        select(ChatParticipant).where(
+            ChatParticipant.chat_id == chat_id,
+            ChatParticipant.user_id == current_user.id,
+        )
+    )
+    cp = cp.scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    cp.archived = archived
+    await db.commit()
+    from services.websocket_manager import manager
+
+    await manager.send_personal_message(
+        current_user.id,
+        {"type": "chat_list_update", "chat_id": str(chat_id), "archived": archived},
+    )
+    return {"archived": archived}

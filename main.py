@@ -13,12 +13,14 @@ from db.session import AsyncSessionLocal
 from services.websocket_manager import manager
 from utils.presence import get_redis, set_online, update_last_seen
 from utils.security import decode_token
+from api.routes import messages
 
 app = FastAPI(title="Chat App Backend", version="0.1.0")
 
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(chats.router)
+app.include_router(messages.router)
 app.include_router(media.router)
 app.include_router(status.router)
 app.include_router(health.router)

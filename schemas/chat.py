@@ -11,4 +11,6 @@ class ChatOut(BaseModel):
     group_name: Optional[str] = None
     group_avatar: Optional[str] = None
     created_at: datetime
-    # For list view, we will add last_message later (can be computed separately)
+    pinned: bool = False
+    archived: bool = False
+    last_message: Optional[dict] = None  # could contain text, sender, time

@@ -52,3 +52,17 @@ class MessageDelivery(Base):
     status = Column(SQLEnum(DeliveryStatus), default=DeliveryStatus.SENT)
     delivered_at = Column(DateTime, nullable=True)
     read_at = Column(DateTime, nullable=True)
+
+
+class StarredMessage(Base):
+    __tablename__ = "starred_messages"
+
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    starred_at = Column(DateTime, server_default=func.now())

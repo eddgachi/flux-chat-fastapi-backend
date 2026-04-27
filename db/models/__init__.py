@@ -1,6 +1,6 @@
 from .chat import Chat, ChatParticipant, ChatType
 from .media import Media
-from .message import Message, MessageDelivery, MessageStatus
+from .message import Message, MessageDelivery, MessageStatus, StarredMessage
 from .user import User, UserSession
 
 __all__ = [
@@ -12,5 +12,6 @@ __all__ = [
     "Message",
     "Media",
     "MessageStatus",
+    "StarredMessage",
     "MessageDelivery",
 ]

@@ -1,4 +1,4 @@
 [flake8]
-ignore = E501, E402
+ignore = E501, E402, E712
 max-line-length = 120
 exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,venv,alembic/versions

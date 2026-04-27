@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Boolean, Column, DateTime
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy import ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -35,4 +35,6 @@ class ChatParticipant(Base):
     )
     role = Column(String(20), default="member")  # 'admin' or 'member'
     muted_until = Column(DateTime, nullable=True)
+    pinned = Column(Boolean, default=False)
+    archived = Column(Boolean, default=False)
     joined_at = Column(DateTime, server_default=func.now())
