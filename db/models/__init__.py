@@ -2,7 +2,7 @@ from .call import Call
 from .chat import Chat, ChatParticipant, ChatType
 from .media import Media
 from .message import Message, MessageDelivery, MessageStatus, StarredMessage
-from .user import User, UserSession
+from .user import BlockedUser, User, UserDevice, UserSession
 
 __all__ = [
     "User",
@@ -16,4 +16,6 @@ __all__ = [
     "MessageStatus",
     "StarredMessage",
     "MessageDelivery",
+    "UserDevice",
+    "BlockedUser",
 ]

@@ -1,10 +1,13 @@
+from typing import List
+
+from sqlalchemy import delete, select
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user
-from db.models.user import User
+from db.models.user import BlockedUser, User
 from db.session import get_db
 from schemas.user import UserOut, UserUpdate
 
@@ -54,3 +57,52 @@ async def get_user_presence(
             "status": "offline",
             "last_seen": target.last_seen.isoformat() if target.last_seen else None,
         }
+
+
+@router.post("/block/{user_id}", status_code=204)
+async def block_user(
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot block yourself")
+    # Check if already blocked
+    existing = await db.execute(
+        select(BlockedUser).where(
+            BlockedUser.blocker_id == current_user.id, BlockedUser.blocked_id == user_id
+        )
+    )
+    if existing.scalar_one_or_none():
+        return  # already blocked
+    block = BlockedUser(blocker_id=current_user.id, blocked_id=user_id)
+    db.add(block)
+    await db.commit()
+
+
+@router.post("/unblock/{user_id}", status_code=204)
+async def unblock_user(
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        delete(BlockedUser).where(
+            BlockedUser.blocker_id == current_user.id, BlockedUser.blocked_id == user_id
+        )
+    )
+    await db.commit()
+
+
+@router.get("/blocked", response_model=List[UserOut])
+async def list_blocked(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = (
+        select(User)
+        .join(BlockedUser, BlockedUser.blocked_id == User.id)
+        .where(BlockedUser.blocker_id == current_user.id)
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()

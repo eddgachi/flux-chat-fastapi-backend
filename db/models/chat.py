@@ -37,4 +37,5 @@ class ChatParticipant(Base):
     muted_until = Column(DateTime, nullable=True)
     pinned = Column(Boolean, default=False)
     archived = Column(Boolean, default=False)
+    muted_until = Column(DateTime, nullable=True)
     joined_at = Column(DateTime, server_default=func.now())

@@ -6,6 +6,8 @@ from uuid import UUID
 from celery import Celery
 from sqlalchemy import delete, select
 
+from utils.notifications import send_to_user
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 celery_app = Celery("chat_worker", broker=REDIS_URL, backend=REDIS_URL)
 celery_app.conf.update(
@@ -125,3 +127,24 @@ def delete_expired_statuses():
             return result.rowcount
 
     return asyncio.run(_clean())
+
+
+@celery_app.task
+def send_message_notification(
+    user_id: str, sender_name: str, message_preview: str, chat_id: str
+):
+    import asyncio
+
+    from db.session import AsyncSessionLocal
+
+    async def _send():
+        async with AsyncSessionLocal() as db:
+            await send_to_user(
+                UUID(user_id),
+                sender_name,
+                message_preview,
+                {"chat_id": chat_id, "type": "message"},
+                db,
+            )
+
+    asyncio.run(_send())

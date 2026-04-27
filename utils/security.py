@@ -3,6 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 from jose import jwt
 from passlib.context import CryptContext
+from sqlalchemy import UUID, select
+
+from db.models.user import BlockedUser
 
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
 ALGORITHM = "HS256"
@@ -38,3 +41,23 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
+
+
+async def are_users_blocked(db, user_id1: UUID, user_id2: UUID) -> bool:
+    from sqlalchemy import or_, and_
+
+    result = await db.execute(
+        select(BlockedUser).where(
+            or_(
+                and_(
+                    BlockedUser.blocker_id == user_id1,
+                    BlockedUser.blocked_id == user_id2,
+                ),
+                and_(
+                    BlockedUser.blocker_id == user_id2,
+                    BlockedUser.blocked_id == user_id1,
+                ),
+            )
+        )
+    )
+    return result.scalar_one_or_none() is not None

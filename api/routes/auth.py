@@ -1,11 +1,16 @@
+import base64
 import os
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+import pyotp
+import qrcode
+from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy import UUID, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.deps import get_current_user
 from db.models.user import User, UserSession
 from db.session import get_db
 from schemas.auth import OTPRequest, OTPVerify, RefreshRequest, TokenResponse
@@ -29,6 +34,96 @@ async def get_redis():
     if redis_client is None:
         redis_client = await redis.from_url(REDIS_URL, decode_responses=True)
     return redis_client
+
+
+@router.post("/2fa/enable")
+async def enable_2fa(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.two_step_enabled:
+        raise HTTPException(status_code=400, detail="2FA already enabled")
+    # Generate secret
+    secret = pyotp.random_base32()
+    current_user.two_step_secret = secret
+    await db.commit()
+    # Generate QR code URI
+    totp = pyotp.TOTP(secret)
+    provisioning_uri = totp.provisioning_uri(
+        name=current_user.phone_number, issuer_name="ChatApp"
+    )
+    # Generate QR code as base64
+    qr = qrcode.make(provisioning_uri)
+    buffered = BytesIO()
+    qr.save(buffered, format="PNG")
+    qr_base64 = base64.b64encode(buffered.getvalue()).decode()
+    return {"secret": secret, "qr_code": f"data:image/png;base64,{qr_base64}"}
+
+
+@router.post("/2fa/verify")
+async def verify_2fa(
+    code: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user.two_step_secret:
+        raise HTTPException(status_code=400, detail="2FA not initialized")
+    totp = pyotp.TOTP(current_user.two_step_secret)
+    if not totp.verify(code):
+        raise HTTPException(status_code=400, detail="Invalid code")
+    current_user.two_step_enabled = True
+    await db.commit()
+    return {"message": "2FA enabled"}
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    code: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user.two_step_enabled:
+        raise HTTPException(status_code=400, detail="2FA not enabled")
+    totp = pyotp.TOTP(current_user.two_step_secret)
+    if not totp.verify(code):
+        raise HTTPException(status_code=400, detail="Invalid code")
+    current_user.two_step_enabled = False
+    current_user.two_step_secret = None
+    await db.commit()
+    return {"message": "2FA disabled"}
+
+
+@router.post("/2fa/validate")
+async def validate_2fa(
+    code: str,
+    temp_token: str = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    # Decode temp token to get user_id and ensure it's a short-lived token
+    try:
+        payload = decode_token(temp_token)
+        if payload.get("type") != "temp_2fa":
+            raise HTTPException(status_code=401, detail="Invalid token")
+        user_id = UUID(payload.get("sub"))
+    except:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.get(User, user_id)
+    if not user or not user.two_step_enabled:
+        raise HTTPException(status_code=400, detail="2FA not required")
+    totp = pyotp.TOTP(user.two_step_secret)
+    if not totp.verify(code):
+        raise HTTPException(status_code=400, detail="Invalid code")
+    # Issue real tokens
+    access_token = create_access_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    # Store refresh token in DB
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    user_session = UserSession(
+        user_id=user.id, refresh_token=refresh_token, expires_at=expires_at
+    )
+    db.add(user_session)
+    await db.commit()
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/request-otp")
@@ -114,4 +209,5 @@ async def refresh_token(data: RefreshRequest, db: AsyncSession = Depends(get_db)
     session.expires_at = new_expires
     await db.commit()
 
+    return TokenResponse(access_token=new_access, refresh_token=new_refresh)
     return TokenResponse(access_token=new_access, refresh_token=new_refresh)

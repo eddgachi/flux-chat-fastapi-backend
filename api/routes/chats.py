@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -187,3 +187,49 @@ async def archive_chat(
         {"type": "chat_list_update", "chat_id": str(chat_id), "archived": archived},
     )
     return {"archived": archived}
+
+
+@router.patch("/{chat_id}/mute")
+async def mute_chat(
+    chat_id: UUID,
+    until: Optional[datetime] = Query(
+        None
+    ),  # ISO timestamp, if None -> forever (set far future)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cp = await db.execute(
+        select(ChatParticipant).where(
+            ChatParticipant.chat_id == chat_id,
+            ChatParticipant.user_id == current_user.id,
+        )
+    )
+    cp = cp.scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    if until is None:
+        # mute forever (set to year 2100)
+        until = datetime(2100, 1, 1, tzinfo=timezone.utc)
+    cp.muted_until = until
+    await db.commit()
+    return {"muted_until": until.isoformat()}
+
+
+@router.patch("/{chat_id}/unmute")
+async def unmute_chat(
+    chat_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cp = await db.execute(
+        select(ChatParticipant).where(
+            ChatParticipant.chat_id == chat_id,
+            ChatParticipant.user_id == current_user.id,
+        )
+    )
+    cp = cp.scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=403, detail="Not a participant")
+    cp.muted_until = None
+    await db.commit()
+    return {"muted": False}
