@@ -8,11 +8,15 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from db.models import (
+    Call,
     Chat,
     ChatParticipant,
+    ChatType,
     Media,
     Message,
     MessageDelivery,
+    MessageStatus,
+    StarredMessage,
     User,
     UserSession,
 )

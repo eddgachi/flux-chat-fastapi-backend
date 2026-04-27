@@ -1,3 +1,4 @@
+from .call import Call
 from .chat import Chat, ChatParticipant, ChatType
 from .media import Media
 from .message import Message, MessageDelivery, MessageStatus, StarredMessage
@@ -11,6 +12,7 @@ __all__ = [
     "ChatType",
     "Message",
     "Media",
+    "Call",
     "MessageStatus",
     "StarredMessage",
     "MessageDelivery",

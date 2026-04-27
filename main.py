@@ -1,19 +1,22 @@
-from uuid import UUID
+from datetime import datetime
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
 from sqlalchemy import func, select, update
 
-from api.routes import auth, chats, health, media, status, users
+from api.routes import auth, chats, health, media, messages, status, users
+from db.models.call import Call, CallStatus
 from db.models.chat import Chat, ChatParticipant, ChatType
 from db.models.media import Media
 from db.models.message import DeliveryStatus, Message, MessageDelivery, MessageStatus
 from db.models.user import User
 from db.session import AsyncSessionLocal
 from services.websocket_manager import manager
+from utils.call_manager import delete_call_state, get_call_state, set_call_state
 from utils.presence import get_redis, set_online, update_last_seen
 from utils.security import decode_token
-from api.routes import messages
+from api.routes import calls
 
 app = FastAPI(title="Chat App Backend", version="0.1.0")
 
@@ -23,6 +26,7 @@ app.include_router(chats.router)
 app.include_router(messages.router)
 app.include_router(media.router)
 app.include_router(status.router)
+app.include_router(calls.router)
 app.include_router(health.router)
 
 
@@ -369,6 +373,197 @@ async def websocket_endpoint(
             elif msg_type == "heartbeat":
                 await set_online(user_id)
                 await websocket.send_json({"type": "heartbeat_ack"})
+
+            elif msg_type == "call_offer":
+                # payload: { chat_id, call_type, sdp, call_id (optional) }
+                chat_id = UUID(data["chat_id"])
+                call_type = data["call_type"]  # "audio" or "video"
+                sdp = data["sdp"]
+
+                # Find other participant in chat (private chat only)
+                other_user = await db.execute(
+                    select(ChatParticipant.user_id).where(
+                        ChatParticipant.chat_id == chat_id,
+                        ChatParticipant.user_id != user_id,
+                    )
+                )
+                other_user_id = other_user.scalar_one_or_none()
+                if not other_user_id:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Invalid chat"}
+                    )
+                    continue
+
+                # Generate call_id if not provided
+                call_id = UUID(data.get("call_id", str(uuid4())))
+
+                # Store call in DB
+                call = Call(
+                    id=call_id,
+                    initiator_id=user_id,
+                    receiver_id=other_user_id,
+                    call_type=call_type,
+                    status=CallStatus.RINGING,
+                )
+                db.add(call)
+                await db.commit()
+
+                # Store temporary state in Redis
+                await set_call_state(
+                    call_id,
+                    {
+                        "chat_id": str(chat_id),
+                        "initiator": str(user_id),
+                        "receiver": str(other_user_id),
+                        "call_type": call_type,
+                        "status": "ringing",
+                        "offer_sdp": sdp,
+                        "created_at": datetime.utcnow().isoformat(),
+                    },
+                )
+
+                # Send offer to receiver
+                sent = await manager.send_personal_message(
+                    other_user_id,
+                    {
+                        "type": "call_offer",
+                        "call_id": str(call_id),
+                        "caller_id": str(user_id),
+                        "caller_name": user.name or user.phone_number,
+                        "chat_id": str(chat_id),
+                        "call_type": call_type,
+                        "sdp": sdp,
+                    },
+                )
+                if not sent:
+                    # Receiver offline – mark call as missed and notify caller
+                    call.status = CallStatus.MISSED
+                    call.ended_at = func.now()
+                    await db.commit()
+                    await websocket.send_json(
+                        {"type": "call_error", "reason": "receiver_offline"}
+                    )
+                else:
+                    await websocket.send_json(
+                        {"type": "call_ringing", "call_id": str(call_id)}
+                    )
+
+            elif msg_type == "call_answer":
+                call_id = UUID(data["call_id"])
+                sdp = data["sdp"]
+                state = await get_call_state(call_id)
+                if not state:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Call not found"}
+                    )
+                    continue
+
+                # Update call in DB
+                call = await db.get(Call, call_id)
+                if call:
+                    call.status = CallStatus.ACTIVE
+                    call.started_at = datetime.utcnow()
+                    await db.commit()
+
+                # Update Redis state
+                state["status"] = "active"
+                state["answer_sdp"] = sdp
+                await set_call_state(call_id, state)
+
+                # Forward answer to initiator
+                initiator_id = UUID(state["initiator"])
+                await manager.send_personal_message(
+                    initiator_id,
+                    {
+                        "type": "call_answer",
+                        "call_id": str(call_id),
+                        "sdp": sdp,
+                    },
+                )
+
+            elif msg_type == "ice_candidate":
+                call_id = UUID(data["call_id"])
+                candidate = data["candidate"]
+                sdp_mid = data.get("sdpMid")
+                sdp_mline_index = data.get("sdpMLineIndex")
+
+                state = await get_call_state(call_id)
+                if not state:
+                    continue
+
+                # Determine target: if current user is initiator, send to receiver, else to initiator
+                target_id = (
+                    UUID(state["receiver"])
+                    if user_id == UUID(state["initiator"])
+                    else UUID(state["initiator"])
+                )
+                await manager.send_personal_message(
+                    target_id,
+                    {
+                        "type": "ice_candidate",
+                        "call_id": str(call_id),
+                        "candidate": candidate,
+                        "sdpMid": sdp_mid,
+                        "sdpMLineIndex": sdp_mline_index,
+                    },
+                )
+
+            elif msg_type == "call_end":
+                call_id = UUID(data["call_id"])
+                state = await get_call_state(call_id)
+                if not state:
+                    continue
+
+                # Update call in DB
+                call = await db.get(Call, call_id)
+                if call and call.status == CallStatus.ACTIVE:
+                    call.status = CallStatus.ENDED
+                    call.ended_at = datetime.utcnow()
+                    if call.started_at:
+                        delta = call.ended_at - call.started_at
+                        call.duration_seconds = int(delta.total_seconds())
+                    await db.commit()
+
+                # Delete Redis state
+                await delete_call_state(call_id)
+
+                # Notify the other participant
+                other_id = (
+                    UUID(state["receiver"])
+                    if user_id == UUID(state["initiator"])
+                    else UUID(state["initiator"])
+                )
+                await manager.send_personal_message(
+                    other_id,
+                    {
+                        "type": "call_end",
+                        "call_id": str(call_id),
+                    },
+                )
+
+            elif msg_type == "call_reject":
+                call_id = UUID(data["call_id"])
+                state = await get_call_state(call_id)
+                if not state:
+                    continue
+
+                # Update call in DB
+                call = await db.get(Call, call_id)
+                if call:
+                    call.status = CallStatus.REJECTED
+                    call.ended_at = datetime.utcnow()
+                    await db.commit()
+
+                # Notify initiator
+                initiator_id = UUID(state["initiator"])
+                await manager.send_personal_message(
+                    initiator_id,
+                    {
+                        "type": "call_reject",
+                        "call_id": str(call_id),
+                    },
+                )
+                await delete_call_state(call_id)
 
     except WebSocketDisconnect:
         manager.disconnect(user_id)
