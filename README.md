@@ -12,6 +12,45 @@ Supports private and group messaging, media sharing, voice/video calls, status u
 
 ---
 
+## Table of Contents
+
+- [Features](#features)
+  - [Messaging](#messaging)
+  - [Media & Files](#media--files)
+  - [Presence & Status](#presence--status)
+  - [Voice & Video Calls](#voice--video-calls)
+  - [Chat Management](#chat-management)
+  - [Notifications & Security](#notifications--security)
+  - [Backup & Restore](#backup--restore)
+- [Tech Stack](#tech-stack)
+- [Architecture Overview](#architecture-overview)
+- [Quick Start](#quick-start)
+  - [Run with Docker](#run-with-docker-recommended)
+  - [First-time setup](#first-time-setup)
+  - [Demo Users](#demo-users)
+- [API Endpoints](#api-endpoints)
+  - [Authentication (endpoint)](#authentication-auth-)
+  - [Users (endpoint)](#users-users-)
+  - [Chats (endpoint)](#chats-chats-)
+  - [Messages (endpoint)](#messages-messages-)
+  - [Media (endpoint)](#media-media-)
+  - [Status (endpoint)](#status-status-)
+  - [Groups (endpoint)](#groups-groups-)
+  - [Calls (endpoint)](#calls-calls-)
+  - [Backup (endpoint)](#backup-backup-)
+  - [WebSocket](#websocket)
+- [Project Structure](#project-structure)
+- [Flutter Client Integration](#flutter-client-integration)
+- [Configuration](#configuration)
+- [Development](#development)
+  - [Local setup](#local-setup-without-docker)
+  - [Run tests](#run-tests)
+  - [Create migrations](#create-a-migration)
+- [Scaling](#scaling)
+- [License](#license)
+
+---
+
 ## Features
 
 ### Messaging
@@ -333,6 +372,24 @@ docker compose exec app python seed_data.py
 ```
 
 ---
+
+## Flutter Client Integration
+
+A complete Flutter frontend for Flux Chat is available in the dedicated repository:  
+**[flux-chat-flutter](https://github.com/eddachi/flux-chat-flutter)**
+
+The Flutter app uses **Riverpod** for state management and follows the same architecture as the backend.
+
+### Key Features in the Flutter Client
+
+- Authentication flow (OTP request/verify, token refresh)
+- Real‑time messaging with WebSocket (Riverpod `StreamNotifier` / `AsyncNotifier`)
+- Message list with pagination, read receipts, typing indicators
+- Group management (create, add members, change roles)
+- Media upload (images, videos, voice notes) using `image_picker` and `dio`
+- Voice/video calls via WebRTC (`flutter_webrtc`)
+- Push notifications (FCM)
+- Dark mode, local database (Hive) for offline message caching
 
 ## Configuration
 
