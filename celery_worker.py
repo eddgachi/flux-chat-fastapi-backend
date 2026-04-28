@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -6,7 +8,9 @@ from uuid import UUID
 from celery import Celery
 from sqlalchemy import delete, select
 
+from utils.backup import collect_user_backup_data
 from utils.notifications import send_to_user
+from utils.storage import upload_backup_file
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 celery_app = Celery("chat_worker", broker=REDIS_URL, backend=REDIS_URL)
@@ -148,3 +152,29 @@ def send_message_notification(
             )
 
     asyncio.run(_send())
+
+
+@celery_app.task
+def create_backup(user_id: str):
+    import asyncio
+
+    from db.session import AsyncSessionLocal
+
+    async def _create():
+        async with AsyncSessionLocal() as db:
+            data = await collect_user_backup_data(UUID(user_id), db)
+            # Convert to JSON string
+            json_str = json.dumps(data, default=str)
+            # Store in temporary file
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as f:
+                f.write(json_str)
+                tmp_path = f.name
+            # Upload to storage (local or S3)
+            backup_id = f"{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+            download_url = await upload_backup_file(tmp_path, backup_id)
+            os.unlink(tmp_path)
+            return download_url
+
+    return asyncio.run(_create())

@@ -17,6 +17,7 @@ from utils.call_manager import delete_call_state, get_call_state, set_call_state
 from utils.presence import get_redis, set_online, update_last_seen
 from utils.security import decode_token
 from api.routes import calls
+from api.routes import backup
 
 app = FastAPI(title="Chat App Backend", version="0.1.0")
 
@@ -27,6 +28,7 @@ app.include_router(messages.router)
 app.include_router(media.router)
 app.include_router(status.router)
 app.include_router(calls.router)
+app.include_router(backup.router)
 app.include_router(health.router)
 
 
