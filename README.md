@@ -138,12 +138,12 @@ flowchart TB
     CEL -.-> FCM
     WS -.-> TURN
 
-    classDef client fill:#e1f5fe,stroke:#0288d1
-    classDef api fill:#f3e5f5,stroke:#7b1fa2
-    classDef cache fill:#fff3e0,stroke:#e65100
-    classDef storage fill:#e8f5e9,stroke:#2e7d32
-    classDef worker fill:#fce4ec,stroke:#c62828
-    classDef external fill:#f5f5f5,stroke:#616161,stroke-dasharray: 5 5
+    classDef client fill:#bbdefb,stroke:#1565c0,color:#000000
+    classDef api fill:#e1bee7,stroke:#6a1b9a,color:#000000
+    classDef cache fill:#ffe0b2,stroke:#e65100,color:#000000
+    classDef storage fill:#c8e6c9,stroke:#2e7d32,color:#000000
+    classDef worker fill:#f8bbd0,stroke:#c62828,color:#000000
+    classDef external fill:#e0e0e0,stroke:#424242,stroke-dasharray: 5 5,color:#000000
 
     class C1,C2 client
     class FA1,FA2,FA3,WS api
