@@ -23,4 +23,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run the application
-CMD sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+CMD sh -c "alembic upgrade head && python3 seed_data.py && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"

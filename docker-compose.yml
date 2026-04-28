@@ -55,6 +55,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-chatdb}
       - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
     volumes:
       - .:/app
     env_file:
@@ -69,6 +70,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-chatdb}
       - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
     volumes:
       - .:/app
     env_file:
