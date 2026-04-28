@@ -132,8 +132,8 @@ Supports private and group messaging, media sharing, voice/video calls, status u
 ### Run with Docker (recommended)
 
 ```bash
-git clone <repo-url> flux-chat
-cd flux-chat
+git clone https://github.com/eddgachi/flux-chat-fastapi-backend
+cd flux-chat-fastapi-backend
 
 cp .env.example .env
 docker compose up -d --build
